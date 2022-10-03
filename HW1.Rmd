@@ -56,6 +56,7 @@ data("mpg")
 p <- ggplot(mpg,aes(x = forcats::fct_infreq(manufacturer)))
 p + geom_bar() + coord_flip()
 ```
+
 Excercise 4
 ```{r}
 library(ggplot2)
