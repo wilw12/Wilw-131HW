@@ -29,14 +29,14 @@ abalone_test <- testing(abalone_split)
 
 Question 3
 ```{r}
-age_recipe <- recipe(age ~ . , data = abalone_train) %>%
+abalone_recipe <- recipe(age ~ . , data = abalone_train) %>%
   step_dummy(all_nominal_predictors()) %>%
   step_interact(terms = ~ starts_with('type'):shucked_weight
                 + longest_shell:diameter
                 + shucked_weight:shell_weight)%>%
   step_center(all_predictors())%>%
   step_scale(all_predictors())
-summary(age_recipe)
+summary(abalone_recipe)
 ```
 
 Question 4
@@ -65,14 +65,14 @@ shucked_weight <- 1
 viscera_weight <- 2
 shell_weight <- 1
 hypo1 <- data.frame(type, longest_shell, diameter, height, whole_weight, shucked_weight, viscera_weight, shell_weight)
-lm_fit <- fit(lm_workflow, abalone_training) 
+lm_fit <- fit(lm_workflow, abalone_train) 
 predict(lm_fit, hypo1)
 ```
 
 Question 7
 ```{r}
-abalone_training_res <- predict(lm_fit, new_data = abalone_training %>% select(-age))
-abalone_training_res <- bind_cols(abalone_training_res, abalone_training %>% select(age))
+abalone_training_res <- predict(lm_fit, new_data = abalone_train %>% select(-age))
+abalone_training_res <- bind_cols(abalone_training_res, abalone_train %>% select(age))
 abalone_matrics <- metric_set(rsq, rmse, mae)
 abalone_matrics(abalone_training_res,truth = age, estimate = .pred)
 ```
