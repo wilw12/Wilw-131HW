@@ -1,0 +1,78 @@
+---
+title: "131 HW2"
+output: html_document
+date: "2022-10-16"
+---
+
+Question 1
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+```{r}
+data1 <- read.csv('/Users/williamwang/Desktop/Wilw-131HW/abalone.csv')
+age <- data1[9]+1.5
+abalone <- cbind(data1,age)
+names(abalone)[10] <- 'age'
+ggplot(abalone, aes(age)) + geom_histogram(col='white', binwidth = 1)
+# The distribution is right skewed 
+```
+
+Question 2
+```{r}
+set.seed(4177)
+data3 = subset(abalone, select = -c(rings))
+abalone_split <- initial_split(data3, prop = 0.80)
+abalone_train <- training(abalone_split)
+abalone_test <- testing(abalone_split)
+```
+
+Question 3
+```{r}
+age_recipe <- recipe(age ~ . , data = abalone_train) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_interact(terms = ~ starts_with('type'):shucked_weight
+                + longest_shell:diameter
+                + shucked_weight:shell_weight)%>%
+  step_center(all_predictors())%>%
+  step_scale(all_predictors())
+summary(age_recipe)
+```
+
+Question 4
+```{r lm engine}
+lm_model <- linear_reg() %>%
+  set_engine('lm') 
+lm_model
+```
+
+Question 5
+```{r}
+lm_workflow <- workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(abalone_recipe) 
+lm_workflow
+```
+
+Question 6
+```{r fit linear model}
+type <- c('F')
+longest_shell <- 0.50
+diameter <- 0.10
+height <- 0.30
+whole_weight <- 4
+shucked_weight <- 1
+viscera_weight <- 2
+shell_weight <- 1
+hypo1 <- data.frame(type, longest_shell, diameter, height, whole_weight, shucked_weight, viscera_weight, shell_weight)
+lm_fit <- fit(lm_workflow, abalone_training) 
+predict(lm_fit, hypo1)
+```
+
+Question 7
+```{r}
+abalone_training_res <- predict(lm_fit, new_data = abalone_training %>% select(-age))
+abalone_training_res <- bind_cols(abalone_training_res, abalone_training %>% select(age))
+abalone_matrics <- metric_set(rsq, rmse, mae)
+abalone_matrics(abalone_training_res,truth = age, estimate = .pred)
+```
