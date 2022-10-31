@@ -1,0 +1,150 @@
+---
+title: "HW3"
+output: html_document
+date: "2022-10-31"
+---
+
+```{r package installed, include=FALSE}
+library(tidymodels)
+library(tidyverse)
+library(ggplot2)
+library(ggthemes)
+library(corrr)
+library(discrim)
+library(poissonreg)
+library(klaR)
+library(pROC)
+tidymodels_prefer()
+```
+
+```{r dataset load}
+df <- read.csv('/Users/williamwang/Desktop/Wilw-131HW/titanic.csv') %>%
+  mutate(survived = factor(survived, 
+                           levels = c("Yes", "No")),
+         pclass = factor(pclass))
+```
+## Question 1
+```{r}
+set.seed(891)
+titanic_split <- initial_split(df, prop = 0.80, strata = survived)
+titanic_training <- training(titanic_split)
+titanic_testing <- testing(titanic_split)
+```
+Helps us to confirm that each subgroup within the population receives proper representation within the sample.
+## Question 2
+```{r explore the distributio of survived variable}
+ggplot(titanic_training, aes(survived))+
+  geom_bar()
+```
+Binomial distribution. 
+
+## Question 3
+```{r}
+cor_titanic <- titanic_training %>% 
+  select(-c(survived, name, sex, ticket, cabin, embarked)) %>% 
+  correlate()
+cor_titanic
+rplot(cor_titanic) 
+```
+\
+passengers and coin_flip have positive linear relationship. 
+ 
+
+## Question 4
+```{r dummy recipe}
+titanic_recipe <- recipe(survived ~ pclass+sex+age+sib_sp+parch+fare, data = titanic_training) %>%
+  step_impute_linear(age) %>%
+  step_dummy(all_nominal_predictors()) %>% 
+  step_interact(terms = ~ starts_with('sex'):fare+
+                  age:fare)
+summary(titanic_recipe)
+```
+## Question 5
+```{r engine & workflow}
+log_reg <- logistic_reg() %>% 
+  set_engine('glm') %>% 
+  set_mode('classification')
+log_wf <- workflow() %>% 
+  add_model(log_reg) %>% 
+  add_recipe(titanic_recipe)
+log_fit <- fit(log_wf, titanic_training)
+```
+## Question 6
+```{r LDA}
+lda_mode <- discrim_linear() %>% 
+  set_engine('MASS') %>% 
+  set_mode('classification')
+lda_wf <- workflow() %>% 
+  add_model(lda_mode) %>% 
+  add_recipe(titanic_recipe)
+lda_fit <- fit(lda_wf, titanic_training)
+```
+## Question 7
+```{r QDA}
+qda_mode <- discrim_quad() %>% 
+  set_engine('MASS') %>% 
+  set_mode('classification')
+qda_wf <- workflow() %>% 
+  add_model(qda_mode) %>% 
+  add_recipe(titanic_recipe)
+qda_fit <- fit(qda_wf, titanic_training)
+```
+## Question 8
+```{r Naive Bayes}
+nb_mode <- naive_Bayes() %>% 
+  set_mode("classification") %>% 
+  set_engine("klaR") %>% 
+  set_args(usekernel = FALSE) 
+nb_wf <- workflow() %>% 
+  add_model(nb_mode) %>% 
+  add_recipe(titanic_recipe)
+nb_fit <- fit(nb_wf, titanic_training)
+```
+## Question 9 
+```{r log prediction}
+log_acc <- predict(log_fit, new_data = titanic_training, type = 'class') %>% 
+  bind_cols(titanic_training %>% select(survived)) %>% 
+  accuracy(truth = survived, estimate = .pred_class)
+```
+```{r lda prediction}
+lda_acc <- predict(lda_fit, new_data = titanic_training, type = 'class') %>% 
+  bind_cols(titanic_training %>% select(survived)) %>% 
+  accuracy(truth = survived, estimate = .pred_class)
+```
+```{r qda prediction}
+qda_acc <- predict(qda_fit, new_data = titanic_training, type = 'class') %>% 
+  bind_cols(titanic_training %>% select(survived)) %>% 
+  accuracy(truth = survived, estimate = .pred_class)
+```
+```{r Naive-Bayes prediction, warning=FALSE}
+nb_acc <- predict(nb_fit, new_data = titanic_training, type = 'class') %>% 
+  bind_cols(titanic_training %>% select(survived)) %>% 
+  accuracy(truth = survived, estimate = .pred_class)
+```
+```{r compare accuracy}
+results <- bind_rows(log_acc, lda_acc, qda_acc, nb_acc) %>% 
+  tibble() %>% mutate(model = c("Logistic Regression", "Linear Discrminant Analysis", "Quadratic Discrminant Analysis", "Naive-Bayes Analysis")) %>% 
+  select(model, .estimate)
+results
+```
+Logistic Regression has the highest accuracy. 
+
+## Question 10
+```{r fit model}
+log_fit_test <- fit(log_wf, titanic_testing)
+log_test_acc <- predict(log_fit_test, titanic_testing) %>% 
+  bind_cols(titanic_testing %>% select(survived)) %>% 
+  accuracy(truth = survived, estimate = .pred_class)
+log_test_acc
+log_result <- augment(log_fit_test, titanic_testing)
+log_result %>% 
+  conf_mat(truth = survived, estimate = .pred_class) %>% 
+  autoplot(type = "heatmap")
+log_result %>% 
+  roc_curve(survived, .pred_Yes) %>% 
+  autoplot()
+log_result %>% 
+  roc_auc(survived, .pred_Yes) # calculate the area under the roc curve
+```
+The model performs pretty well as the auc is 0.8637681 which is close to 1. 
+The accuracy for testing data is higher than the training data. It shows that the model fitting is pretty good. 
