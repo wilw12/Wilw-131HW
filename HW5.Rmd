@@ -1,0 +1,112 @@
+---
+title: "HW5"
+output: html_document
+date: "2022-11-20"
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(corrplot)
+library(ggthemes)
+library(janitor)
+library(ISLR)
+library(ISLR2)
+library(compiler)
+library(glmnet)
+tidymodels_prefer()
+#Loading Required Packages
+
+```
+#Question 1
+```{r}
+pokemon <- read.csv("/Users/williamwang/Desktop/Wilw-131HW/pokemon.csv")
+cleaned_pokemon <- clean_names(pokemon)
+
+## From the description. By using clean_names(), the resulting column names are change to a format that only consist of the underscore, numbers, and letters. It is useful as in it makes calling variables easier and gets rid of unreadable characters.
+
+
+```
+
+#Question 2
+```{r}
+cleaned_pokemon %>% 
+  ggplot()+
+  geom_bar(aes(type_1))
+cleaned_pokemon <- filter(cleaned_pokemon,type_1 %in% c("Bug", "Fire", "Grass", "Normal", "Water", "Psychic")) %>% 
+  mutate(type_1 = factor(type_1),legendary = factor(legendary),generation = factor(generation))
+
+##There are 18 classes of outcome. There are very few pokemons belonging to the flying type.
+
+
+```
+#Question 3
+```{r}
+set.seed(3435)
+PKM_split <- initial_split(cleaned_pokemon, strata = type_1, prop=0.80)
+PKM_train <- training(PKM_split)
+PKM_test <- testing(PKM_split)
+#K fold Cross-Validation
+t_fold <- vfold_cv(PKM_train, v=5,strata = type_1)
+#Stratifying the folds could be useful because it keeps the distribution, aka the proportion of variable types in each fold to be the same so that it is easier for us to analyze and avoid overfitting.
+```
+
+#Question 4
+```{r}
+PKM_recipe <- recipe(type_1~legendary+generation+sp_atk+attack+speed+defense+hp+sp_def,data = PKM_train) %>% 
+  step_dummy(c(legendary,generation)) %>% 
+  step_normalize(all_predictors())
+#PKM_recipe %>% 
+ # prep() %>% 
+  #juice()
+```
+#Question 5
+```{r}
+log_spec <- multinom_reg(penalty = tune(),
+  mixture = tune()) %>% 
+  set_engine("glmnet")
+
+PKM_wkfl <- workflow() %>% 
+  add_recipe(PKM_recipe) %>% 
+  add_model(log_spec)
+
+degree_grid <- grid_regular(penalty(range = c(-5, 5)), mixture(range=c(0,1)), levels = 10)
+#Because the grid has 10 level penalty and 10 level mixture, and we set 5 folds, so there are 500 models to be fitted in total
+```
+
+#Question 6
+```{r}
+tune_res <- tune_grid(
+  object = PKM_wkfl, 
+  resamples = t_fold, 
+  grid = degree_grid
+)
+autoplot(tune_res)
+#From the results we could observe that the higher the penalty, the lower the accuracy. Larger/Smaller value of regularization determines ROC_AUC and accuracy
+```
+#Question 7
+```{r}
+best_roc_auc <- select_best(tune_res,metric = "roc_auc") 
+final_fl <- finalize_workflow(PKM_wkfl,best_roc_auc) 
+final_fit <- fit(final_fl,PKM_train) 
+aug_fit <- augment(final_fit, new_data = PKM_test, type = "prob") %>% 
+  mutate(type_1 = as.factor(type_1)) %>% 
+  roc_auc(truth = type_1, .pred_Bug:.pred_Water)
+aug_fit
+```
+#Question 8
+```{r}
+aug_fit <- augment(final_fit, new_data = PKM_test, type = "prob") %>% 
+  mutate(type_1 = as.factor(type_1)) 
+PKM_roc <- roc_auc(aug_fit, truth = type_1 ,estimate = .pred_Bug:.pred_Water)
+PKM_roc
+roc_curve(aug_fit, truth = type_1, estimate=.pred_Bug:.pred_Water) %>%
+  autoplot() 
+aug_fit %>% 
+  conf_mat(truth= type_1, estimate=.pred_class) %>% 
+  autoplot(type="heatmap")
+#From the results, we could observe that the model performs poorly in predicting grass and fire types. From the heat map, the model doesn't perform well besides predicting the normal type. I think the independent variables have little correlations to the response variable so that we cannot come up with a logical prediction between them.
+
+
+```
