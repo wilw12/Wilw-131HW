@@ -1,0 +1,232 @@
+---
+title: "HW6"
+output: html_document
+date: "2022-11-27"
+---
+
+```{r}
+library(janitor)
+library(corrplot)
+library(tidymodels)
+library(tidyverse)
+library(ISLR)
+library(rpart.plot)
+library(vip)
+library(janitor)
+library(randomForest)
+library(xgboost)
+library(ranger)
+tidymodels_prefer(quiet = TRUE)
+library(conflicted)
+```
+
+#Q1
+```{r}
+pokemon <- read.csv("/Users/williamwang/Desktop/Wilw-131HW/pokemon.csv")
+cleaned_pokemon <- clean_names(pokemon)
+
+# cleand
+cleaned_pokemon <- filter(cleaned_pokemon,type_1 %in% c("Bug", "Fire", "Grass", "Normal", "Water", "Psychic")) %>% 
+  mutate(type_1 = factor(type_1),legendary = factor(legendary),generation = factor(generation))
+
+# spilt
+pkm_split<-initial_split(cleaned_pokemon,prop=0.80,strata = "type_1" )
+pkm_train<-training(pkm_split)
+pkm_test<-testing(pkm_split)
+
+# k-fold
+t_fold <- vfold_cv(pkm_train, v=5)
+
+# recipe
+pkm_recipe <- recipe(type_1~legendary+generation+sp_atk+attack+speed+defense+hp+sp_def,data = pkm_train) %>% 
+  step_dummy(c(legendary,generation)) %>% 
+  step_normalize(all_predictors())
+```
+
+#Q2
+```{r}
+cor_pkm <- pkm_train %>%
+  select_if(is.numeric) %>% #we filter out non-numeric variable
+  cor()
+  # lsr::correlate()
+# rplot(cor_pkm$correlation)
+# XX <- cor(pkm_train)
+corrplot.mixed(cor_pkm,order = "AOE")
+# correlated to a degree which makes sense since they are features of same object (just in terms of one pokemon)
+```
+
+#Q3
+```{r}
+set.seed(123)
+tree_spec <- decision_tree() %>%
+  set_engine("rpart") %>% 
+  set_mode("classification") %>% 
+  set_args(cost_complexity = tune())
+
+# workflow
+tree_wf <- workflow() %>%
+  add_recipe(pkm_recipe) %>%
+  add_model(tree_spec)
+
+# grid range = c(-3, -1)
+pkm_grid <- grid_regular(cost_complexity(range = c(-3, -1)), levels = 10)
+# tuning grid
+tune_res <- tune_grid(
+  object = tree_wf, 
+  resamples = t_fold, 
+  grid = pkm_grid ,
+  metrics = metric_set(... = roc_auc)
+)
+autoplot(tune_res)
+```
+
+#Q4
+```{r}
+collect_metrics(tune_res) %>% 
+arrange(desc(mean))  
+# Best is model 6
+```
+#Q5
+```{r}
+conflict_prefer("legend", "PerformanceAnalytics")
+best_complexity <- select_best(tune_res)
+
+class_tree_final <- finalize_workflow(tree_wf, best_complexity)
+
+class_tree_final_fit <- fit(class_tree_final, data = pkm_train)
+
+class_tree_final_fit %>%
+  extract_fit_engine() %>%
+  rpart.plot()
+```
+
+```{r}
+# random forest
+bagging_spec <- rand_forest(mtry = .cols()) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification") %>% 
+  set_args(mtry = tune(),trees = tune(), min_n = tune())
+# workflow random forest
+rand_tree_wf <- workflow() %>%
+  add_recipe(pkm_recipe) %>%
+  add_model(bagging_spec)
+# set up grid
+pkm_grid_2 <- grid_regular(mtry(range = c(1, 8)),trees(range = c(0, 8)), min_n(range = c(0, 4)),levels = 8)
+
+## When building tree models, the number of predictors called mtry is randomly selected at each split. trees is an integer that represents how many trees are in the ensemble. The minimum number of data points in a node necessary to split the node further is represented by the integer min n. If the predictor number is 8, the regression model would be linear.
+```
+
+
+#Q6
+```{r}
+tune_res_rand <- tune_grid(
+  object = rand_tree_wf, 
+  resamples = t_fold, 
+  grid = pkm_grid_2 ,
+  metrics = metric_set(... = roc_auc)
+)
+autoplot(tune_res_rand)
+```
+
+#Q7
+```{r}
+collect_metrics(tune_res_rand) %>% 
+  arrange(desc(mean))
+#0.711 is the best
+```
+
+#Q8
+```{r}
+best_roc_auc <- select_best(tune_res_rand)
+
+rand_tree_final <- finalize_workflow(rand_tree_wf, best_roc_auc)
+
+rf_fit <- fit(rand_tree_final, data = pkm_train)
+
+extract_fit_engine(rf_fit) %>% 
+vip()
+
+## sp_atk is most useful, generate_X2 is least useful expected as showed in the correlation matrix in HW5.The relationship between variables are clear.
+```
+
+#Q9
+```{r}
+set.seed(1234)
+boost_spec <- boost_tree() %>%
+  set_engine("xgboost") %>%
+  set_mode("classification")
+
+boost_wf <- workflow() %>%
+  add_model(boost_spec %>%
+  set_args(trees = tune())) %>%
+  add_recipe(pkm_recipe)
+
+boost_grid <- grid_regular(trees(range = c(10, 2000)), levels = 10)
+
+boost_tune_res <- tune_grid(
+  boost_wf,
+  resamples = t_fold,
+  grid = boost_grid,
+  metrics = metric_set(... = roc_auc)
+)
+autoplot(boost_tune_res)
+```
+
+```{r}
+collect_metrics(boost_tune_res) %>% 
+  arrange(desc(mean))  
+## The value of roc_auc converges after 500 trees, the best roc_auc value is 0.7193
+```
+
+#Q10
+```{r}
+#decision tree
+best_complexity <- select_best(tune_res)
+class_tree_final <- finalize_workflow(tree_wf, best_complexity)
+class_tree_final_fit <- fit(class_tree_final, data = pkm_test)
+#random forest
+best_roc_auc <- select_best(tune_res_rand)
+rand_tree_final <- finalize_workflow(rand_tree_wf, best_roc_auc)
+rf_fit <- fit(rand_tree_final, data = pkm_test)
+#boost model
+best_roc_auc <- select_best(boost_tune_res)
+rand_tree_final <- finalize_workflow(boost_wf, best_roc_auc)
+boost_fit <- fit(rand_tree_final, data = pkm_train)
+
+#roc_auc
+deci_tree_fit <- augment(class_tree_final_fit, 
+                         new_data = pkm_test, 
+                         type = "prob") %>% 
+  mutate(type_1 = as.factor(type_1)) %>% 
+  roc_auc(truth = type_1, .pred_Bug:.pred_Water)
+rand_tree_fit <- augment(rf_fit, 
+                         new_data = pkm_test, 
+                         type = "prob") %>% 
+  mutate(type_1 = as.factor(type_1)) %>% 
+  roc_auc(truth = type_1, .pred_Bug:.pred_Water)
+boost_model_fit <- augment(boost_fit, 
+                         new_data = pkm_test, 
+                         type = "prob") %>% 
+  mutate(type_1 = as.factor(type_1)) %>% 
+  roc_auc(truth = type_1, .pred_Bug:.pred_Water)
+df_rocauc <- bind_rows("ROC_AUC of Decision Tree model"= deci_tree_fit,"ROC_AUC of Random Forest model"=rand_tree_fit,"ROC_AUC of Boosted model"=boost_model_fit,.id="model")
+df_rocauc
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
