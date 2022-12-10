@@ -1,0 +1,20 @@
+```{r}
+test2 <- read.csv("/Users/williamwang/Desktop/Wilw-131HW/Dataset/ETH Data.csv")
+USD <- tq_get("DX-Y.NYB", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+test1
+test2
+USD
+```
+
+```{r}
+USD$date <- as.character(USD$date)
+```
+
+```{r}
+match(USD$date,test2$Date)
+test2$Close[match(USD$date,test2$Date)]
+USD$close_1=test2$Close[match(USD$date,test2$Date)]
+na.omit(USD)
+```
+
+

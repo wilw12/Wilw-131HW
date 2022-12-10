@@ -1,0 +1,27 @@
+```{r}
+USD <- tq_get("DX-Y.NYB", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+Riot <- tq_get("RIOT", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+Gold <- tq_get("GC=F", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+Nasdaq <- tq_get("NQ=F", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+USD
+Riot
+Gold
+Nasdaq
+```
+
+```{r}
+USD$date <- as.character(USD$date)
+Riot$date <- as.character(Riot$date)
+Gold$date <- as.character(Gold$date)
+Nasdaq$date <- as.character(Nasdaq$date)
+```
+
+```{r}
+match(Riot$date,Gold$date)
+Gold$close[match(Riot$date,Gold$date)]
+Riot$Gold_close=Gold$close[match(Riot$date,Gold$date)]
+na.omit(Riot)
+```
+
+
+
