@@ -1,0 +1,583 @@
+---
+title: "ETH"
+date: "2022-11-29"
+output:
+    html_document:
+      toc: true
+      toc_float: true
+      code_folding: show
+---
+
+# Introduction
+The purpose of this project is to predict Ethereum price through NFT market performance and other predictors. The project uses supervised model and consists of two part: 1.explore relationship among predictors. 2.Apply model for predictions
+
+```{r}
+library(janitor)
+library(corrplot)
+library(tidymodels)
+library(tidyverse)
+library(ISLR)
+library(rpart.plot)
+library(vip)
+library(janitor)
+library(randomForest)
+library(xgboost)
+library(ranger)
+tidymodels_prefer(quiet = TRUE)
+library(conflicted)
+library(discrim)
+library(poissonreg)
+library(corrr)
+tidymodels_prefer()
+suppressMessages(library(tidyquant))
+library(ggplot2)
+library(fitdistrplus)
+library(reshape2)
+library(patchwork)
+library(parallel)
+library(lsr)
+library(tidyquant)
+library(caret)
+library(leaps)
+library(ggpubr)
+library(parsnip)
+library(kknn)
+```
+
+
+```{r}
+eth <- read.csv("/Users/williamwang/Desktop/Wilw-131HW/Dataset/ETH Data.csv")
+USD <- tq_get("DX-Y.NYB", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+Riot <- tq_get("RIOT", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+Gold <- tq_get("GC=F", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+Nasdaq <- tq_get("NQ=F", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+Treasureyield <- tq_get("^TNX", get = "stock.price", from = " 2021-11-30", to = "2022-11-25")
+```
+
+```{r}
+USD$date <- as.character(USD$date)
+Riot$date <- as.character(Riot$date)
+Gold$date <- as.character(Gold$date)
+Nasdaq$date <- as.character(Nasdaq$date)
+Treasureyield$date <- as.character(Treasureyield$date)
+```
+
+
+
+```{r}
+match(Riot$date,Gold$date)
+Gold$close[match(Riot$date,Gold$date)]
+Riot$Gold_close=Gold$close[match(Riot$date,Gold$date)]
+na.omit(Riot)
+Dataset <- Riot
+```
+
+
+
+
+```{r}
+Dataset <- Dataset[ , c("date","close", "Gold_close")]
+Dataset <- rename(Dataset, Riot_close=close)
+
+```
+
+```{r}
+match(Dataset$date,USD$date)
+USD$close[match(Dataset$date,USD$date)]
+Dataset$USD_close=USD$close[match(Dataset$date,USD$date)]
+na.omit(Dataset)
+```
+
+```{r}
+match(Dataset$date,Nasdaq$date)
+Nasdaq$close[match(Dataset$date,Nasdaq$date)]
+Dataset$Nasdaq_close=Nasdaq$close[match(Dataset$date,Nasdaq$date)]
+na.omit(Dataset)
+```
+
+```{r}
+match(Dataset$date,Treasureyield$date)
+Treasureyield$close[match(Dataset$date,Treasureyield$date)]
+Dataset$Treasureyield_close=Treasureyield$close[match(Dataset$date,Treasureyield$date)]
+na.omit(Dataset)
+```
+
+```{r}
+xxxx <- match(Dataset$date,eth$Date)
+list1 <- na.omit(xxxx)
+eth <- eth[c(list1),]
+```
+
+```{r}
+Dataset <- rename(Dataset, Date = date)
+Data <- merge(Dataset, eth, by = "Date")
+```
+
+# Explorarotory Data Analysis
+
+```{r}
+ggplot(Data,aes(x=Log.return.ETH))+
+  geom_histogram(bins = 50, color = "red")+
+  labs(title = "Histogram of ETH price at close") +
+  theme(legend.position = "none")
+```
+
+```{r}
+cor_Data <- Data %>%
+  select_if(is.numeric) %>%
+  lsr::correlate()
+
+#rplot(cor_df$correlation)
+
+corrplot(cor_Data$correlation)
+```
+
+
+```{r}
+Data = subset(Data, select = -c(Log.return.ETH,Nasdaq_close,USD_close,ETH_Volume) )
+```
+
+
+```{r}
+cor_Data <- Data %>%
+  select_if(is.numeric) %>%
+  lsr::correlate()
+
+#rplot(cor_df$correlation)
+
+corrplot(cor_Data$correlation)
+```
+
+
+```{r}
+plot.ts(Data$ETH_Close, main="ETH price Regression")
+fit <- lm(Data$ETH_Close ~ as.numeric(1:length(Data$ETH_Close)))
+abline(fit, col="red")
+abline(h=mean(Data$ETH_Close), col="blue")
+```
+
+```{r}
+P1 <- Data %>%
+  ggplot(aes(x=Riot_close, y=ETH_Close)) + 
+  geom_point(alpha = 0.5) + 
+  labs(title = 'Riot Price vs ETH Price') +
+  geom_smooth(method = 'lm', formula = 'y ~ x') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.2))
+P2 <- Data %>%
+  ggplot(aes(x=Gold_close, y=ETH_Close)) + 
+  geom_point(alpha = 0.5) + 
+  labs(title = 'Gold Price vs ETH Price') +
+  geom_smooth(method = 'lm', formula = 'y ~ x') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.2))
+P3 <- Data %>%
+  ggplot(aes(x=Treasureyield_close, y=ETH_Close)) + 
+  geom_point(alpha = 0.5) + 
+  labs(title = 'Treasureyield Price vs ETH Price') +
+  geom_smooth(method = 'lm', formula = 'y ~ x') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.2))
+
+
+P1+P2+P3
+```
+
+```{r}
+P4 <- Data %>%
+  ggplot(aes(x=Number.of.sales.in.all.segments, y=ETH_Close)) + 
+  geom_point(alpha = 0.5) + 
+  labs(title = 'Number of NFT sales vs ETH Price') +
+  geom_smooth(method = 'lm', formula = 'y ~ x') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.2))
+
+P5 <- Data %>%
+  ggplot(aes(x=Active.market.wallets.in.all.segments, y=ETH_Close)) + 
+  geom_point(alpha = 0.5) + 
+  labs(title = 'Number of active wallets in NFT market vs ETH Price') +
+  geom_smooth(method = 'lm', formula = 'y ~ x') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.2))
+P6 <- Data %>%
+  ggplot(aes(x=Average.USD, y=ETH_Close)) + 
+  geom_point(alpha = 0.5) + 
+  labs(title = 'Average sale price(USD) in NFT market vs ETH Price') +
+  geom_smooth(method = 'lm', formula = 'y ~ x') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.2))
+P7 <- Data %>%
+  ggplot(aes(x=Sales.USD, y=ETH_Close)) + 
+  geom_point(alpha = 0.2) + 
+  labs(title = 'Total sales (USD) in NFT market vs ETH Price') +
+  geom_smooth(method = 'lm', formula = 'y ~ x') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+P4+P5+P6+P7
+```
+
+
+# EDA Summary
+From the graphs shown above, even though we can see that the simple linear regression does not fit the data very well, predictors have positive correlations, except for the Treasure yield which have negative correlation with ETH_Close.
+
+```{r}
+set.seed(300)
+Data_Train <- Data %>%
+  initial_split(prop = 0.8) #it roughly seperates the data before and after year 2020
+eth_train <- training(Data_Train)
+eth_test <- testing(Data_Train)
+```
+
+# Recipe creation& K-fold
+```{r}
+eth_recipe <- recipe(ETH_Close ~ Riot_close + Gold_close + Treasureyield_close+
+                      Sales.USD + Number.of.sales.in.all.segments + Active.market.wallets.in.all.segments + Average.USD,
+                    data = Data) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_normalize(all_predictors()) %>%
+  step_novel(all_nominal_predictors()) %>%
+  step_zv(all_nominal_predictors())
+               
+eth_folds <- vfold_cv(eth_train, v = 10, repeats = 5)
+```
+
+# Ridge Regression
+```{r}
+#set up model
+ridge_spec <- linear_reg(penalty = tune(), mixture = 0) %>%
+  set_mode("regression") %>%
+  set_engine("glmnet")
+
+#set up workflow
+ridge_workflow <- workflow() %>%
+  add_recipe(eth_recipe) %>%
+  add_model(ridge_spec)
+
+# Create a regular grid
+penalty_grid <- grid_regular(penalty(range = c(-3, 3), trans = log10_trans()), levels = 20)
+
+
+# Fit the models to the folded data using tune_grid().
+tune_res <- tune_grid(
+  ridge_workflow,
+  resamples = eth_folds,
+  grid = penalty_grid
+)
+
+
+
+# use autoplot() on the results
+autoplot(tune_res)
+```
+
+# Collect Ridge Metric
+```{r}
+Ridge_RMSE <- collect_metrics(tune_res) %>%
+  dplyr::select(.metric, mean, std_err)
+Ridge_RMSE <-  Ridge_RMSE[c(1,2),]
+```
+
+```{r}
+best_penalty <- select_best(tune_res, metric = "rsq")
+best_penalty
+```
+Low penalty indicates that the dataset is large.
+
+```{r}
+ridge_final <- finalize_workflow(ridge_workflow, best_penalty)
+ridge_final_fit <- fit(ridge_final, data = eth_train)
+
+Ridge_Prediction <- predict(ridge_final_fit, 
+                            new_data = eth_test %>% 
+                              dplyr::select(-`ETH_Close`))
+Ridge_Prediction <- bind_cols(Ridge_Prediction, 
+                              eth_test %>% 
+                                dplyr::select(`ETH_Close`))
+
+Ridge_Graph <- Ridge_Prediction %>%
+  ggplot(aes(x=.pred, y=`ETH_Close`)) + 
+  geom_point(alpha = 1) + 
+  geom_abline(lty = 2) + 
+  theme_bw() + 
+  coord_obs_pred()
+
+Ridge_Accuracy <- augment(ridge_final_fit, new_data = eth_test) %>%
+  rsq(truth = `ETH_Close`, estimate = .pred)
+```
+
+# Lasso Regression
+
+```{r}
+lasso_spec <-
+  linear_reg(penalty = tune(), mixture = 1) %>%
+  set_mode("regression") %>%
+  set_engine("glmnet")
+
+
+lasso_workflow <- workflow() %>%
+  add_recipe(eth_recipe) %>%
+  add_model(lasso_spec)
+
+
+
+tune_res_lasso <- tune_grid(
+  lasso_workflow,
+  resamples = eth_folds,
+  grid = penalty_grid
+)
+
+
+autoplot(tune_res_lasso)
+```
+
+
+```{r}
+Lasso_RMSE <- collect_metrics(tune_res_lasso) %>%
+  dplyr::select(.metric, mean, std_err) %>%
+  head(2)#?
+```
+
+```{r}
+best_penalty_lasso <- select_best(tune_res_lasso, metric = "rsq")
+lasso_final <- finalize_workflow(lasso_workflow, best_penalty_lasso)
+
+lasso_final_fit <- fit(lasso_final, data = eth_train)
+Lasso_Prediction <- predict(lasso_final_fit, new_data = eth_test %>% 
+                              dplyr::select(-`ETH_Close`))
+Lasso_Prediction <- bind_cols(Lasso_Prediction, eth_test %>% 
+                                dplyr::select(`ETH_Close`))
+Lasso_Graph <- Lasso_Prediction %>%
+  ggplot(aes(x=.pred, y=`ETH_Close`)) + 
+  geom_point(alpha=1) + 
+  geom_abline(lty = 2) + 
+  theme_bw() + 
+  coord_obs_pred()
+Lasso_Accuracy <- augment(lasso_final_fit, new_data = eth_test) %>%
+  rsq(truth = `ETH_Close`, estimate = .pred)
+```
+
+# KNN
+
+```{r}
+KNN_spec <-nearest_neighbor() %>%
+  set_mode("regression") %>%
+  set_engine("kknn") %>% 
+  set_args(neighbors = tune(),
+           weight_func = tune(),
+           dist_power = tune())
+
+translate(KNN_spec)
+```
+
+
+```{r}
+KNN_workflow <- workflow() %>%
+  add_recipe(eth_recipe) %>%
+  add_model(KNN_spec)
+
+
+knn1_res <- tune_grid(
+  KNN_workflow,
+  resamples = eth_folds,
+  # control = tune::control_resamples(save_pred = TRUE)
+)
+
+autoplot(knn1_res)
+```
+
+```{r}
+KNN_RMSE <- collect_metrics(knn1_res) %>% 
+  dplyr::select(.metric, mean, std_err) %>% 
+  head()
+
+
+best_KNN_final <- select_best(knn1_res,metric = "rsq")
+best_KNN_final_model <- finalize_workflow(KNN_workflow, best_KNN_final)
+
+best_KNN_final_model_fit <- fit(best_KNN_final_model, data = eth_train)
+KNN_Prediction <- predict(best_KNN_final_model_fit, 
+                            new_data = eth_test %>% 
+                              dplyr::select(-`ETH_Close`))
+KNN_Prediction <- bind_cols(KNN_Prediction, 
+                              eth_test %>% 
+                              dplyr::select(`ETH_Close`))
+KNN_Graph <- KNN_Prediction %>%
+  ggplot(aes(x=.pred, y=`ETH_Close`)) + 
+  geom_point(alpha=1) + 
+  geom_abline(lty = 2) + 
+  theme_bw() + 
+  coord_obs_pred()
+KNN_Accuracy <- augment(best_KNN_final_model_fit, new_data = eth_test) %>%
+  rsq(truth = `ETH_Close`, estimate = .pred)
+```
+
+# Boosted Model
+
+```{r}
+boost_spec <- boost_tree() %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+
+boost_wf <- workflow() %>%
+  add_model(boost_spec %>%
+  set_args(trees = tune())) %>%
+  add_recipe(eth_recipe)
+
+boost_grid <- grid_regular(trees(range = c(10, 60)), levels = 10)
+
+boost_tune_res <- tune_grid(
+  boost_wf,
+  resamples = eth_folds,
+  grid = boost_grid,
+)
+autoplot(boost_tune_res)
+```
+
+```{r}
+Boost_RMSE <- collect_metrics(boost_tune_res) %>% 
+  dplyr::select(.metric, mean, std_err) %>%
+  head()
+```
+
+```{r}
+best_boost_final <- select_best(boost_tune_res,metric = "rsq")
+best_boost_final_model <- finalize_workflow(boost_wf, best_boost_final)
+
+best_boost_final_model_fit <- fit(best_boost_final_model, data = eth_train)
+Boost_Prediction <- predict(best_boost_final_model_fit, 
+                            new_data = eth_test %>% 
+                              dplyr::select(-`ETH_Close`))
+Boost_Prediction <- bind_cols(Boost_Prediction, 
+                              eth_test %>% 
+                              dplyr::select(`ETH_Close`))
+Boost_Graph <- Boost_Prediction %>%
+  ggplot(aes(x=.pred, y=`ETH_Close`)) + 
+  geom_point(alpha=1) + 
+  geom_abline(lty = 2) + 
+  theme_bw() + 
+  coord_obs_pred()
+Boost_Accuracy <- augment(best_boost_final_model_fit, new_data = eth_test) %>%
+  rsq(truth = `ETH_Close`, estimate = .pred)
+```
+
+# Decision Tree
+
+```{r}
+tree_spec <-decision_tree() %>%
+  set_engine("rpart")
+class_tree_spec <- tree_spec %>%
+  set_mode("regression")
+  
+class_tree_wf <- workflow() %>%
+  add_model(class_tree_spec %>% 
+            set_args(cost_complexity = tune())) %>%
+  add_recipe(eth_recipe)
+
+param_grid <- grid_regular(cost_complexity(range = c(-5, -1)), levels = 10)
+tune_res_tree <- tune_grid(
+  class_tree_wf,
+  resamples = eth_folds,
+  grid = param_grid,
+)
+autoplot(tune_res_tree)
+```
+
+```{r}
+Tree_RMSE <- collect_metrics(tune_res_tree) %>%
+  dplyr::select(.metric, mean, std_err) %>%
+  head(2)
+```
+
+```{r}
+library(rpart.plot)
+best_complexity <- select_best(tune_res_tree, "rsq")
+class_tree_final <- finalize_workflow(class_tree_wf, best_complexity)
+class_tree_final_fit <- fit(class_tree_final, data = eth_train)
+class_tree_final_fit %>%
+  extract_fit_engine() %>%
+  rpart.plot()
+```
+
+```{r}
+Tree_Prediction <- predict(class_tree_final_fit, 
+                           new_data = eth_test %>% 
+                             dplyr::select(-`ETH_Close`))
+Tree_Prediction <- bind_cols(Tree_Prediction, 
+                             eth_test %>% 
+                               dplyr::select(`ETH_Close`))
+Tree_Graph <- Tree_Prediction %>%
+  ggplot(aes(x=.pred, y=`ETH_Close`)) + 
+  geom_point(alpha=1) + 
+  geom_abline(lty = 2) + 
+  theme_bw() + 
+  coord_obs_pred()
+Tree_Accuracy <- augment(class_tree_final_fit, new_data = eth_test) %>%
+  rsq(truth = `ETH_Close`, estimate = .pred)
+```
+
+# Model Comparison
+
+```{r}
+
+figure <- ggarrange(Ridge_Graph, Lasso_Graph, Boost_Graph,Tree_Graph,KNN_Graph,
+                    labels = c("Ridge", "Lasso", "Boost","Tree","KNN"),
+                    ncol = 3, nrow = 3)
+figure
+```
+
+Analysis: 5 graphs shows the ratio of the real data of ETH_Close and the prediction data. Most data lie around the line with slope one with shows that the prediction data fits the real data very well.
+
+# RMSE & RSQ in Training Set
+
+```{r}
+head(Ridge_RMSE)
+```
+
+```{r}
+head(Lasso_RMSE)
+```
+
+```{r}
+head(Boost_RMSE, 2)
+```
+
+```{r}
+head(Tree_RMSE, 2)
+```
+
+```{r}
+head(KNN_RMSE)
+```
+
+# R-Squared of Testing Set
+
+```{r}
+Accuracy_comparisons <- bind_rows(Ridge_Accuracy, Lasso_Accuracy, KNN_Accuracy, Tree_Accuracy, Boost_Accuracy) %>% 
+  tibble() %>% 
+  mutate(model = c("Ridge", "Lasso", "KNN", "Boost", "Tree")) %>% 
+  dplyr::select(model, .estimate) %>%
+  arrange(.estimate)
+Accuracy_comparisons
+```
+
+# Conclusion
+From the result, we can see that the Decision Tree model performs the best. However, all models have around 94%~98% accuracy which implies that the model is over-fitting. From the correlation plot from the correlation plot from the EDA section, we can see the relatively high correlation among the predictors. This would be a plausible reason for the high accuracy in the results. But the high fitness of the prediction models indicates the strong influence of those predictors to ETH price as well. 
+
+# Reference
+Data are from Yahoo Finance and Nonfungible.com.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
